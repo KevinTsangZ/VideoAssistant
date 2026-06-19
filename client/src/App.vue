@@ -127,7 +127,8 @@
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>
                 </span>
                 <div class="label-group">
-                  <span class="item-label">AI总结</span>
+                  <span class="item-label ai-label-line">AI</span>
+                  <span class="item-label ai-label-line">总结</span>
                 </div>
                 <div class="shimmer"></div>
               </button>
@@ -1343,7 +1344,8 @@ html, body, #app {
 .dock-item:hover:not(:disabled) { color: var(--accent-lime); border-color: var(--accent-lime); background: var(--bg-soft); }
 .dock-item:disabled { opacity: 0.3; cursor: not-allowed; }
 .dock-item.ai-core { border-color: var(--accent-purple); color: var(--accent-purple); }
-.dock-item.ai-core .label-group { display: flex; flex-direction: column; align-items: flex-start; z-index: 1; }
+.dock-item.ai-core .label-group { display: flex; flex-direction: column; align-items: center; z-index: 1; line-height: 1.1; }
+.dock-item.ai-core .ai-label-line { display: block; }
 .dock-item.ai-core .item-sub { font-size: 0.75rem; color: var(--accent-purple); opacity: 0.8; }
 .dock-item.ai-core:hover:not(:disabled) { border-color: var(--accent-purple); color: var(--text-inverse); background: var(--accent-purple); }
 .dock-item.ai-core:hover:not(:disabled) .item-sub { color: var(--text-inverse); }
