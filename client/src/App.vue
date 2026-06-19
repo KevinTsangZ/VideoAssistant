@@ -37,7 +37,7 @@
             <span class="btn-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
             </span>
-            模型设置
+            API Key 配置
             <span class="settings-state" :class="{ configured: hasUserAiKey }">{{ hasUserAiKey ? '已配置' : 'API Key' }}</span>
           </button>
 
@@ -197,7 +197,7 @@
         <div class="settings-panel" @click.stop>
           <div class="settings-header">
             <div>
-              <h2 class="settings-title">模型设置</h2>
+              <h2 class="settings-title">API Key 配置</h2>
               <p class="settings-subtitle">配置自己的 OpenAI 兼容接口，用于生成视频笔记</p>
             </div>
             <button class="close-btn" @click="closeSettingsModal" :disabled="settingsSaving">×</button>
@@ -354,6 +354,8 @@ const emptyNotesText = computed(() => {
 
 const hasUserAiKey = computed(() => currentUser.value?.hasAiApiKey === true)
 
+const canUploadVideo = computed(() => remainingFreeUploads.value > 0 || hasUserAiKey.value)
+
 const aiSettingsTitle = computed(() => {
   if (!currentUser.value) return '登录后配置自己的模型 API Key'
   return hasUserAiKey.value ? '已配置自己的模型 API Key' : '配置自己的模型 API Key'
@@ -376,6 +378,7 @@ const openUploadModal = () => {
     openAuthModal()
     return
   }
+  if (!ensureCanUpload()) return
   showUploadModal.value = true
 }
 
@@ -403,11 +406,21 @@ const closeSettingsModal = () => {
   settingsForm.value.aiApiKey = ''
 }
 
+const ensureCanUpload = () => {
+  if (canUploadVideo.value) return true
+  showMsg('⚠️ 免费上传次数已用完，请点击右上角“API Key 配置”填写自己的 API Key 后继续上传', true)
+  return false
+}
+
 const handleFileChange = async (e) => {
   if (!currentUser.value) {
     e.target.value = ''
     showMsg('⚠️ 权限受限：请先登录系统', true)
     openAuthModal()
+    return
+  }
+  if (!ensureCanUpload()) {
+    e.target.value = ''
     return
   }
   const selectedFile = e.target.files[0]
@@ -424,6 +437,7 @@ const handleDrop = async (e) => {
     openAuthModal()
     return
   }
+  if (!ensureCanUpload()) return
   const droppedFiles = e.dataTransfer.files
   if (!droppedFiles || droppedFiles.length === 0) return
   const selectedFile = droppedFiles[0]
@@ -474,6 +488,7 @@ const handleUrlUpload = async () => {
     openAuthModal()
     return
   }
+  if (!ensureCanUpload()) return
 
   // 简单校验链接
   if (!videoUrl.value.startsWith('http')) {
@@ -620,6 +635,7 @@ const saveAiSettings = async () => {
       settingsMessage.value = '模型设置已保存'
       settingsError.value = false
       showMsg('✅ 模型设置已保存')
+      await fetchUserQuota()
     } else {
       settingsMessage.value = data.msg || '保存失败'
       settingsError.value = true

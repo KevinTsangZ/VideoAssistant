@@ -3,6 +3,7 @@ package com.example.server.controller;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.example.server.entity.MediaFile;
+import com.example.server.entity.User;
 import com.example.server.mapper.MediaFileMapper;
 import com.example.server.mapper.UserMapper;
 import com.example.server.service.MediaService;
@@ -25,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/media")
 @CrossOrigin(originPatterns = "*", allowCredentials = "true")
 public class MediaController {
+
+    private static final int FREE_UPLOAD_LIMIT = 5;
 
     @Autowired(required = false)
     private MediaFileMapper mediaFileMapper;
@@ -63,6 +66,10 @@ public class MediaController {
         if (mediaFileMapper == null) {
             return ResponseEntity.status(500).body("Upload failed: database not ready");
         }
+        UploadQuota quota = checkUploadQuota(userId);
+        if (!quota.allowed()) {
+            return ResponseEntity.status(403).body(quota.message());
+        }
         try {
             System.out.println("Uploading to MinIO...");
             String fileUrl = minioUtils.uploadFile(file);
@@ -81,7 +88,9 @@ public class MediaController {
             mediaFileMapper.insert(mediaFile);
 
             if (userId != null) {
-                incrementFreeUploadUsed(userId);
+                if (quota.consumeFreeUpload()) {
+                    incrementFreeUploadUsed(userId);
+                }
                 String cacheKey = "media:list:user:" + userId;
                 redisTemplate.delete(cacheKey);
                 System.out.println("Cache cleared: " + cacheKey);
@@ -106,6 +115,10 @@ public class MediaController {
             if (mediaFileMapper == null) {
                 return org.springframework.http.ResponseEntity.status(500).body("Upload failed: database not ready");
             }
+            UploadQuota quota = checkUploadQuota(userId);
+            if (!quota.allowed()) {
+                return org.springframework.http.ResponseEntity.status(403).body(quota.message());
+            }
             System.out.println("Received upload url: " + url);
 
             tempFile = ytDlpUtils.downloadVideo(url);
@@ -125,7 +138,9 @@ public class MediaController {
             mediaFileMapper.insert(mediaFile);
 
             if (userId != null) {
-                incrementFreeUploadUsed(userId);
+                if (quota.consumeFreeUpload()) {
+                    incrementFreeUploadUsed(userId);
+                }
                 String cacheKey = "media:list:user:" + userId;
                 redisTemplate.delete(cacheKey);
                 System.out.println("Cache cleared: " + cacheKey);
@@ -212,4 +227,31 @@ public class MediaController {
         update.setSql("free_upload_used = free_upload_used + 1");
         userMapper.update(null, update);
     }
+
+    private UploadQuota checkUploadQuota(Long userId) {
+        if (userId == null) {
+            return new UploadQuota(false, false, "请先登录后再上传视频");
+        }
+        if (userMapper == null) {
+            return new UploadQuota(false, false, "Upload failed: user database not ready");
+        }
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            return new UploadQuota(false, false, "用户不存在，请重新登录");
+        }
+        if (hasText(user.getAiApiKey())) {
+            return new UploadQuota(true, false, "");
+        }
+        int used = user.getFreeUploadUsed() == null ? 0 : user.getFreeUploadUsed();
+        if (used >= FREE_UPLOAD_LIMIT) {
+            return new UploadQuota(false, false, "免费上传次数已用完，请点击右上角“API Key 配置”填写自己的 API Key 后继续上传");
+        }
+        return new UploadQuota(true, true, "");
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private record UploadQuota(boolean allowed, boolean consumeFreeUpload, String message) {}
 }
