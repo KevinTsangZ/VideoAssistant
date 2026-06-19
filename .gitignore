@@ -1,0 +1,5 @@
+.idea/
+*.iml
+.claude/
+server/src/main/resources/application.properties
+*.zip
