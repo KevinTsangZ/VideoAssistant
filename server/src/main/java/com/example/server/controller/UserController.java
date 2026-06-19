@@ -161,14 +161,21 @@ public class UserController {
             String aiApiKey = normalizeNullable(payload.get("aiApiKey"));
             String aiModel = normalizeNullable(payload.get("aiModel"));
             boolean clearApiKey = Boolean.TRUE.equals(payload.get("clearApiKey"));
+            boolean restoreDefault = Boolean.TRUE.equals(payload.get("restoreDefault"));
 
             UpdateWrapper<User> update = new UpdateWrapper<>();
             update.eq("id", userId);
-            update.set("ai_base_url", firstNonBlank(aiBaseUrl, defaultAiBaseUrl));
-            update.set("ai_model", firstNonBlank(aiModel, DEFAULT_AI_MODEL));
-            if (clearApiKey) {
+            if (restoreDefault) {
+                update.set("ai_base_url", null);
                 update.set("ai_api_key", null);
-            } else if (hasText(aiApiKey)) {
+                update.set("ai_model", null);
+            } else {
+                update.set("ai_base_url", firstNonBlank(aiBaseUrl, defaultAiBaseUrl));
+                update.set("ai_model", firstNonBlank(aiModel, DEFAULT_AI_MODEL));
+            }
+            if (!restoreDefault && clearApiKey) {
+                update.set("ai_api_key", null);
+            } else if (!restoreDefault && hasText(aiApiKey)) {
                 update.set("ai_api_key", aiApiKey);
             }
             userMapper.update(null, update);

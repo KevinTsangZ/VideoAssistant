@@ -217,6 +217,7 @@
             </div>
             <p class="settings-hint">不填写新的 API Key 时，会保留服务器上已保存的 Key；没有配置时会继续使用系统默认额度。</p>
             <div class="settings-actions">
+              <button class="settings-default-btn" @click="restoreDefaultAiSettings" :disabled="settingsSaving">恢复默认</button>
               <button class="settings-clear-btn" @click="clearAiKey" :disabled="settingsSaving || !hasUserAiKey">清除 Key</button>
               <button class="settings-save-btn" @click="saveAiSettings" :disabled="settingsSaving">
                 {{ settingsSaving ? '保存中...' : '保存设置' }}
@@ -687,6 +688,47 @@ const clearAiKey = async () => {
       settingsError.value = false
     } else {
       settingsMessage.value = data.msg || '清除失败'
+      settingsError.value = true
+    }
+  } catch (error) {
+    console.error(error)
+    settingsMessage.value = '网络连接错误'
+    settingsError.value = true
+  } finally {
+    settingsSaving.value = false
+  }
+}
+
+const restoreDefaultAiSettings = async () => {
+  if (!currentUser.value?.id) return
+  if (!confirm('确认恢复为系统默认模型配置吗？这会清除你保存的 API Key。')) return
+  settingsSaving.value = true
+  settingsMessage.value = ''
+  settingsError.value = false
+  try {
+    const res = await fetch('/api/user/ai-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: currentUser.value.id,
+        restoreDefault: true
+      })
+    })
+    const data = await res.json()
+    if (data.code === 200) {
+      saveCurrentUser(data.userInfo)
+      settingsForm.value = {
+        aiBaseUrl: data.aiBaseUrl || '',
+        aiApiKey: '',
+        aiModel: data.aiModel || '',
+        maskedAiApiKey: ''
+      }
+      settingsMessage.value = '已恢复为系统默认配置'
+      settingsError.value = false
+      showMsg('✅ 已恢复为系统默认配置')
+      await fetchUserQuota()
+    } else {
+      settingsMessage.value = data.msg || '恢复默认失败'
       settingsError.value = true
     }
   } catch (error) {
@@ -1299,12 +1341,16 @@ html, body, #app {
 .settings-body { padding: 24px; }
 .settings-hint { color: var(--text-sub); font-size: 0.84rem; line-height: 1.7; margin-top: -4px; margin-bottom: 18px; }
 .settings-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.settings-default-btn,
 .settings-clear-btn,
 .settings-save-btn { border: 1px solid var(--border-tech); border-radius: 8px; padding: 10px 14px; font-family: inherit; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+.settings-default-btn { background: var(--bg-soft); color: var(--accent-lime); }
+.settings-default-btn:hover:not(:disabled) { border-color: var(--accent-lime); background: #e0edff; }
 .settings-clear-btn { background: #fff; color: var(--text-sub); }
 .settings-clear-btn:hover:not(:disabled) { color: #ff4757; border-color: #fecaca; background: #fff7f7; }
 .settings-save-btn { background: var(--accent-lime); border-color: var(--accent-lime); color: #fff; }
 .settings-save-btn:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+.settings-default-btn:disabled,
 .settings-clear-btn:disabled,
 .settings-save-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .settings-msg { margin-top: 14px; color: var(--accent-purple); font-size: 0.86rem; text-align: right; }
