@@ -213,7 +213,10 @@
           <div class="settings-header">
             <div>
               <h2 class="settings-title">API Key 配置</h2>
-              <p class="settings-subtitle">配置自己的 OpenAI 兼容接口，用于生成视频笔记</p>
+              <p class="settings-subtitle">
+                配置自己的 OpenAI 兼容接口，用于生成视频笔记
+                <span>推荐使用硅基流动</span>
+              </p>
             </div>
             <button class="close-btn" @click="closeSettingsModal" :disabled="settingsSaving">×</button>
           </div>
@@ -364,7 +367,7 @@ const remainingFreeUploads = computed(() => Math.max(0, FREE_UPLOAD_LIMIT - free
 
 const emptyNotesText = computed(() => {
   if (!currentUser.value) {
-    return '尚未登录，登录后可以免费上传五次视频，让AI帮您做笔记'
+    return '尚未登录，每个新用户可以免费上传五次视频，让AI帮您做笔记'
   }
   return `目前还没有任何笔记，您还可以免费上传${remainingFreeUploads.value}次视频，免费次数用完后需要配置自己的API Key`
 })
@@ -1415,7 +1418,8 @@ html, body, #app {
 .settings-panel { width: 520px; max-width: 100%; background: var(--bg-card); border: 1px solid var(--border-tech); border-radius: 8px; box-shadow: 0 24px 70px -34px rgba(15, 23, 42, 0.45); overflow: hidden; animation: slideUpFade 0.24s ease forwards; }
 .settings-header { display: flex; justify-content: space-between; gap: 16px; padding: 22px 24px; border-bottom: 1px solid var(--border-tech); background: #fbfdff; }
 .settings-title { font-size: 1.2rem; line-height: 1.2; margin-bottom: 6px; color: var(--text-main); }
-.settings-subtitle { color: var(--text-sub); font-size: 0.9rem; line-height: 1.5; }
+.settings-subtitle { color: var(--text-sub); font-size: 0.9rem; line-height: 1.5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.settings-subtitle span { color: var(--accent-purple); background: #ecfdf5; border: 1px solid #99f6e4; border-radius: 999px; padding: 2px 8px; font-size: 0.78rem; font-weight: 700; white-space: nowrap; }
 .settings-body { padding: 24px; }
 .settings-hint { color: var(--text-sub); font-size: 0.84rem; line-height: 1.7; margin-top: -4px; margin-bottom: 18px; }
 .settings-actions { display: flex; justify-content: flex-end; gap: 10px; }
