@@ -21,12 +21,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
 
     private void ensureFreeUploadUsedColumn() {
         try {
-            Integer exists = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
-                            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'free_upload_used'",
-                    Integer.class
-            );
-            if (exists != null && exists == 0) {
+            if (!columnExists("users", "free_upload_used")) {
                 jdbcTemplate.execute("ALTER TABLE users ADD COLUMN free_upload_used INT NOT NULL DEFAULT 0");
                 jdbcTemplate.execute(
                         "UPDATE users u " +
@@ -36,8 +31,31 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 );
                 System.out.println("Database migrated: users.free_upload_used added");
             }
+            if (!columnExists("users", "ai_base_url")) {
+                jdbcTemplate.execute("ALTER TABLE users ADD COLUMN ai_base_url VARCHAR(255) NULL");
+                System.out.println("Database migrated: users.ai_base_url added");
+            }
+            if (!columnExists("users", "ai_api_key")) {
+                jdbcTemplate.execute("ALTER TABLE users ADD COLUMN ai_api_key VARCHAR(512) NULL");
+                System.out.println("Database migrated: users.ai_api_key added");
+            }
+            if (!columnExists("users", "ai_model")) {
+                jdbcTemplate.execute("ALTER TABLE users ADD COLUMN ai_model VARCHAR(128) NULL");
+                System.out.println("Database migrated: users.ai_model added");
+            }
         } catch (Exception e) {
             System.err.println("Database migration skipped: " + e.getMessage());
         }
+    }
+
+    private boolean columnExists(String tableName, String columnName) {
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+                        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                Integer.class,
+                tableName,
+                columnName
+        );
+        return exists != null && exists > 0;
     }
 }

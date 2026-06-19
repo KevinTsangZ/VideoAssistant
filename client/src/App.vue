@@ -33,9 +33,17 @@
             </button>
           </div>
 
-          <div class="status-pill" :class="{ 'is-active': uploading }">
+          <button class="settings-nav-btn" @click="openSettingsModal" :title="aiSettingsTitle">
+            <span class="btn-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+            </span>
+            模型设置
+            <span class="settings-state" :class="{ configured: hasUserAiKey }">{{ hasUserAiKey ? '已配置' : 'API Key' }}</span>
+          </button>
+
+          <div v-if="uploading" class="status-pill is-active">
             <div class="status-dot"></div>
-            <span class="status-text">{{ uploading ? '数据传输中...' : '系统就绪' }}</span>
+            <span class="status-text">数据传输中...</span>
           </div>
         </div>
       </div>
@@ -185,6 +193,40 @@
         </div>
       </div>
 
+      <div v-if="showSettingsModal" class="settings-backdrop" @click="!settingsSaving && closeSettingsModal()">
+        <div class="settings-panel" @click.stop>
+          <div class="settings-header">
+            <div>
+              <h2 class="settings-title">模型设置</h2>
+              <p class="settings-subtitle">配置自己的 OpenAI 兼容接口，用于生成视频笔记</p>
+            </div>
+            <button class="close-btn" @click="closeSettingsModal" :disabled="settingsSaving">×</button>
+          </div>
+          <div class="settings-body">
+            <div class="input-group">
+              <label>BASE URL</label>
+              <input v-model="settingsForm.aiBaseUrl" type="text" placeholder="https://api.siliconflow.cn/v1" />
+            </div>
+            <div class="input-group">
+              <label>API KEY</label>
+              <input v-model="settingsForm.aiApiKey" type="password" :placeholder="settingsForm.maskedAiApiKey || '填写后将只保存在服务器'" />
+            </div>
+            <div class="input-group">
+              <label>MODEL</label>
+              <input v-model="settingsForm.aiModel" type="text" placeholder="deepseek-ai/DeepSeek-R1" />
+            </div>
+            <p class="settings-hint">不填写新的 API Key 时，会保留服务器上已保存的 Key；没有配置时会继续使用系统默认额度。</p>
+            <div class="settings-actions">
+              <button class="settings-clear-btn" @click="clearAiKey" :disabled="settingsSaving || !hasUserAiKey">清除 Key</button>
+              <button class="settings-save-btn" @click="saveAiSettings" :disabled="settingsSaving">
+                {{ settingsSaving ? '保存中...' : '保存设置' }}
+              </button>
+            </div>
+            <p v-if="settingsMessage" class="settings-msg" :class="{ error: settingsError }">{{ settingsMessage }}</p>
+          </div>
+        </div>
+      </div>
+
       <div v-if="showUploadModal" class="upload-backdrop" @click="!uploading && closeUploadModal()">
         <div class="upload-panel" @click.stop>
           <div class="upload-panel-header">
@@ -278,12 +320,22 @@ const sidebar = ref({ visible: false, type: 'ai', title: '', content: '', loadin
 const currentUser = ref(null)
 const showUploadModal = ref(false)
 const showAuthModal = ref(false)
+const showSettingsModal = ref(false)
 const authMode = ref('login')
 const authLoading = ref(false)
 const authMessage = ref('')
 const authError = ref(false)
 const authForm = ref({ username: '', password: '', nickname: '' })
 const pollingTimers = ref({})
+const settingsSaving = ref(false)
+const settingsMessage = ref('')
+const settingsError = ref(false)
+const settingsForm = ref({
+  aiBaseUrl: '',
+  aiApiKey: '',
+  aiModel: '',
+  maskedAiApiKey: ''
+})
 const FREE_UPLOAD_LIMIT = 5
 
 const freeUploadUsed = computed(() => {
@@ -298,6 +350,13 @@ const emptyNotesText = computed(() => {
     return '尚未登录，登录后可以免费上传五次视频，让AI帮您做笔记'
   }
   return `目前还没有任何笔记，您还可以免费上传${remainingFreeUploads.value}次视频，免费次数用完后需要配置自己的API Key`
+})
+
+const hasUserAiKey = computed(() => currentUser.value?.hasAiApiKey === true)
+
+const aiSettingsTitle = computed(() => {
+  if (!currentUser.value) return '登录后配置自己的模型 API Key'
+  return hasUserAiKey.value ? '已配置自己的模型 API Key' : '配置自己的模型 API Key'
 })
 
 // Markdown 解析
@@ -324,6 +383,24 @@ const closeUploadModal = () => {
   if (uploading.value) return
   showUploadModal.value = false
   isDragOver.value = false
+}
+
+const openSettingsModal = async () => {
+  if (!currentUser.value) {
+    showMsg('⚠️ 请先登录后再配置模型设置', true)
+    openAuthModal()
+    return
+  }
+  showSettingsModal.value = true
+  settingsMessage.value = ''
+  settingsError.value = false
+  await fetchAiSettings()
+}
+
+const closeSettingsModal = () => {
+  if (settingsSaving.value) return
+  showSettingsModal.value = false
+  settingsForm.value.aiApiKey = ''
 }
 
 const handleFileChange = async (e) => {
@@ -483,6 +560,112 @@ const fetchUserQuota = async () => {
     }
   } catch (error) {
     console.error(error)
+  }
+}
+
+const fetchAiSettings = async () => {
+  if (!currentUser.value?.id) return
+  try {
+    const res = await fetch(`/api/user/ai-config?userId=${currentUser.value.id}&_t=${Date.now()}`)
+    const data = await res.json()
+    if (data.code === 200) {
+      settingsForm.value = {
+        aiBaseUrl: data.aiBaseUrl || '',
+        aiApiKey: '',
+        aiModel: data.aiModel || '',
+        maskedAiApiKey: data.maskedAiApiKey || ''
+      }
+      saveCurrentUser({
+        ...currentUser.value,
+        hasAiApiKey: data.hasAiApiKey === true,
+        maskedAiApiKey: data.maskedAiApiKey || ''
+      })
+    } else {
+      settingsMessage.value = data.msg || '读取模型设置失败'
+      settingsError.value = true
+    }
+  } catch (error) {
+    console.error(error)
+    settingsMessage.value = '网络连接错误'
+    settingsError.value = true
+  }
+}
+
+const saveAiSettings = async () => {
+  if (!currentUser.value?.id) return
+  if (!settingsForm.value.aiBaseUrl || !settingsForm.value.aiModel) {
+    settingsMessage.value = '请填写 Base URL 和模型名称'
+    settingsError.value = true
+    return
+  }
+  settingsSaving.value = true
+  settingsMessage.value = ''
+  settingsError.value = false
+  try {
+    const res = await fetch('/api/user/ai-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: currentUser.value.id,
+        aiBaseUrl: settingsForm.value.aiBaseUrl,
+        aiApiKey: settingsForm.value.aiApiKey,
+        aiModel: settingsForm.value.aiModel
+      })
+    })
+    const data = await res.json()
+    if (data.code === 200) {
+      saveCurrentUser(data.userInfo)
+      settingsForm.value.aiApiKey = ''
+      settingsForm.value.maskedAiApiKey = data.maskedAiApiKey || ''
+      settingsMessage.value = '模型设置已保存'
+      settingsError.value = false
+      showMsg('✅ 模型设置已保存')
+    } else {
+      settingsMessage.value = data.msg || '保存失败'
+      settingsError.value = true
+    }
+  } catch (error) {
+    console.error(error)
+    settingsMessage.value = '网络连接错误'
+    settingsError.value = true
+  } finally {
+    settingsSaving.value = false
+  }
+}
+
+const clearAiKey = async () => {
+  if (!currentUser.value?.id || !hasUserAiKey.value) return
+  settingsSaving.value = true
+  settingsMessage.value = ''
+  settingsError.value = false
+  try {
+    const res = await fetch('/api/user/ai-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: currentUser.value.id,
+        aiBaseUrl: settingsForm.value.aiBaseUrl,
+        aiModel: settingsForm.value.aiModel,
+        clearApiKey: true
+      })
+    })
+    const data = await res.json()
+    if (data.code === 200) {
+      saveCurrentUser(data.userInfo)
+      settingsForm.value.aiApiKey = ''
+      settingsForm.value.maskedAiApiKey = ''
+      settingsMessage.value = 'API Key 已清除'
+      settingsError.value = false
+    } else {
+      settingsMessage.value = data.msg || '清除失败'
+      settingsError.value = true
+    }
+  } catch (error) {
+    console.error(error)
+    settingsMessage.value = '网络连接错误'
+    settingsError.value = true
+  } finally {
+    settingsSaving.value = false
   }
 }
 
@@ -721,6 +904,7 @@ const handleAuth = async () => {
         closeAuthModal()
         showMsg(`欢迎回来，${data.userInfo.nickname}`)
         fetchUserQuota()
+        fetchAiSettings()
         fetchList()
       } else {
         authMessage.value = '注册成功，请直接登录'
@@ -752,6 +936,7 @@ onMounted(() => {
     } catch(e) {}
   }
   fetchUserQuota()
+  fetchAiSettings()
   fetchList()
 })
 </script>
@@ -798,6 +983,10 @@ html, body, #app {
 .nav-controls { display: flex; align-items: center; gap: 15px; }
 .upload-nav-btn { background: var(--accent-purple); border: 1px solid var(--accent-purple); color: #fff; padding: 8px 16px; border-radius: 8px; font-family: inherit; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; font-size: 0.9rem; }
 .upload-nav-btn:hover { background: #0d8b7e; border-color: #0d8b7e; box-shadow: 0 18px 36px -28px rgba(15, 159, 143, 0.8); }
+.settings-nav-btn { background: var(--bg-card); border: 1px solid var(--border-tech); color: var(--text-main); padding: 8px 12px; border-radius: 8px; font-family: inherit; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; font-size: 0.9rem; }
+.settings-nav-btn:hover { border-color: var(--accent-lime); color: var(--accent-lime); background: var(--bg-soft); }
+.settings-state { border-left: 1px solid var(--border-tech); padding-left: 8px; color: var(--text-sub); font-size: 0.74rem; font-weight: 700; }
+.settings-state.configured { color: var(--accent-purple); }
 .auth-btn { background: var(--accent-lime); border: 1px solid var(--accent-lime); color: #fff; padding: 8px 16px; border-radius: 8px; font-family: inherit; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; font-size: 0.9rem; }
 .auth-btn:hover { background: #1d4ed8; border-color: #1d4ed8; box-shadow: var(--shadow-glow-lime); }
 .user-profile { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; color: var(--text-main); }
@@ -1057,6 +1246,26 @@ html, body, #app {
 .auth-msg { margin-top: 15px; text-align: center; font-family: inherit; font-size: 0.8rem; color: var(--accent-lime); }
 .auth-msg.error { color: #ff4757; }
 
+/* 模型设置 */
+.settings-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.24); backdrop-filter: blur(5px); z-index: 1900; display: flex; justify-content: center; align-items: center; padding: 24px; }
+.settings-panel { width: 520px; max-width: 100%; background: var(--bg-card); border: 1px solid var(--border-tech); border-radius: 8px; box-shadow: 0 24px 70px -34px rgba(15, 23, 42, 0.45); overflow: hidden; animation: slideUpFade 0.24s ease forwards; }
+.settings-header { display: flex; justify-content: space-between; gap: 16px; padding: 22px 24px; border-bottom: 1px solid var(--border-tech); background: #fbfdff; }
+.settings-title { font-size: 1.2rem; line-height: 1.2; margin-bottom: 6px; color: var(--text-main); }
+.settings-subtitle { color: var(--text-sub); font-size: 0.9rem; line-height: 1.5; }
+.settings-body { padding: 24px; }
+.settings-hint { color: var(--text-sub); font-size: 0.84rem; line-height: 1.7; margin-top: -4px; margin-bottom: 18px; }
+.settings-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.settings-clear-btn,
+.settings-save-btn { border: 1px solid var(--border-tech); border-radius: 8px; padding: 10px 14px; font-family: inherit; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+.settings-clear-btn { background: #fff; color: var(--text-sub); }
+.settings-clear-btn:hover:not(:disabled) { color: #ff4757; border-color: #fecaca; background: #fff7f7; }
+.settings-save-btn { background: var(--accent-lime); border-color: var(--accent-lime); color: #fff; }
+.settings-save-btn:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+.settings-clear-btn:disabled,
+.settings-save-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.settings-msg { margin-top: 14px; color: var(--accent-purple); font-size: 0.86rem; text-align: right; }
+.settings-msg.error { color: #ff4757; }
+
 /* 删除按钮 */
 .delete-btn {
   position: absolute; top: 10px; right: 10px; background: transparent; border: none;
@@ -1077,8 +1286,10 @@ html, body, #app {
   .brand-video { font-size: 1.45rem; }
   .nav-controls { gap: 8px; flex-wrap: wrap; justify-content: flex-start; width: 100%; }
   .upload-nav-btn,
+  .settings-nav-btn,
   .auth-btn { padding: 7px 12px; font-size: 0.85rem; }
   .status-pill { padding: 6px 10px; }
+  .settings-state { display: none; }
 
   .main-container { padding: 2.4rem 1rem; }
   .hero-section { margin-bottom: 3rem; }
@@ -1091,6 +1302,11 @@ html, body, #app {
   .slogan-sub { font-size: 0.95rem; margin-bottom: 2rem; }
 
   .upload-backdrop { align-items: flex-start; padding: 16px; overflow-y: auto; }
+  .settings-backdrop { align-items: flex-start; padding: 16px; overflow-y: auto; }
+  .settings-panel { margin-top: 24px; }
+  .settings-header,
+  .settings-body { padding: 18px; }
+  .settings-actions { flex-direction: column-reverse; }
   .upload-panel { width: 100%; margin-top: 24px; }
   .upload-panel-header { padding: 18px; }
   .upload-panel-title { font-size: 1.1rem; }

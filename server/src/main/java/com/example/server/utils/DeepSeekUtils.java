@@ -3,7 +3,10 @@ package com.example.server.utils;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.example.server.entity.User;
+import com.example.server.mapper.UserMapper;
 import okhttp3.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -13,11 +16,16 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class DeepSeekUtils {
 
+    private static final String DEFAULT_MODEL = "deepseek-ai/DeepSeek-R1";
+
     @Value("${ai.deepseek.api-key}")
     private String apiKey;
 
     @Value("${ai.deepseek.base-url}")
     private String baseUrl;
+
+    @Autowired(required = false)
+    private UserMapper userMapper;
 
     // 配置 HTTP 客户端，超时时间设置长一点，因为 AI 思考需要时间
 
@@ -31,8 +39,13 @@ public class DeepSeekUtils {
      * 真·AI 深度思考
      */
     public String analyzeContent(String content) {
+        return analyzeContent(content, null);
+    }
 
-        String url = baseUrl + "/chat/completions";
+    public String analyzeContent(String content, Long userId) {
+        AiRequestConfig config = resolveConfig(userId);
+
+        String url = trimTrailingSlash(config.baseUrl()) + "/chat/completions";
         //提示词自由发挥，善于利用AI。
         String systemPrompt = """
     # Role
@@ -78,7 +91,7 @@ public class DeepSeekUtils {
 
         // 3. 组装 JSON 参数
         JSONObject jsonBody = new JSONObject();
-        jsonBody.put("model", "deepseek-ai/DeepSeek-R1");
+        jsonBody.put("model", config.model());
         jsonBody.put("stream", false);
 
         JSONArray messages = new JSONArray();
@@ -94,7 +107,7 @@ public class DeepSeekUtils {
 
         Request request = new Request.Builder()
                 .url(url)
-                .addHeader("Authorization", "Bearer " + apiKey)
+                .addHeader("Authorization", "Bearer " + config.apiKey())
                 .addHeader("Content-Type", "application/json")
                 .post(body)
                 .build();
@@ -120,4 +133,40 @@ public class DeepSeekUtils {
             return "❌ 网络连接出错: " + e.getMessage();
         }
     }
+
+    private AiRequestConfig resolveConfig(Long userId) {
+        if (userId != null && userMapper != null) {
+            try {
+                User user = userMapper.selectById(userId);
+                if (user != null && hasText(user.getAiApiKey())) {
+                    return new AiRequestConfig(
+                            firstNonBlank(user.getAiBaseUrl(), baseUrl),
+                            user.getAiApiKey().trim(),
+                            firstNonBlank(user.getAiModel(), DEFAULT_MODEL)
+                    );
+                }
+            } catch (Exception e) {
+                System.err.println("用户 AI 配置读取失败，回退系统默认配置: " + e.getMessage());
+            }
+        }
+        return new AiRequestConfig(baseUrl, apiKey, DEFAULT_MODEL);
+    }
+
+    private String firstNonBlank(String value, String fallback) {
+        return hasText(value) ? value.trim() : fallback;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String trimTrailingSlash(String value) {
+        String text = firstNonBlank(value, baseUrl);
+        while (text.endsWith("/")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text;
+    }
+
+    private record AiRequestConfig(String baseUrl, String apiKey, String model) {}
 }

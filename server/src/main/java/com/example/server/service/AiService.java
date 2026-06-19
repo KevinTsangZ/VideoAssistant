@@ -36,7 +36,7 @@ public class AiService {
             mediaFile.setTranscriptText(text);
 
             // 2. 智能总结
-            String summary = aiAnalysisStrategy.generateSummary(mediaFile.getFilePath());
+            String summary = aiAnalysisStrategy.generateSummary(mediaFile.getFilePath(), mediaFile.getUserId());
             mediaFile.setAiSummary(summary);
 
             // 3. 保存数据库 (这一步你已经成功了)

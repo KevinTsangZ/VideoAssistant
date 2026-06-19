@@ -16,5 +16,5 @@ public interface AiAnalysisStrategy {
      * 对视频内容进行智能总结
      * @param videoPath 视频路径或URL
      */
-    String generateSummary(String videoPath);
+    String generateSummary(String videoPath, Long userId);
 }

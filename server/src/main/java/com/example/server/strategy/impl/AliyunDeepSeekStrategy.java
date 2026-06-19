@@ -26,11 +26,11 @@ public class AliyunDeepSeekStrategy implements AiAnalysisStrategy {
     }
 
     @Override
-    public String generateSummary(String videoPath) {
+    public String generateSummary(String videoPath, Long userId) {
         String text = processVideoToText(videoPath);
         if (text.startsWith("❌")) return text;
 
-        return deepSeekUtils.analyzeContent("请对以下视频提取的文字进行总结，不需要废话，直接列出核心观点：\n" + text);
+        return deepSeekUtils.analyzeContent("请对以下视频提取的文字进行总结，不需要废话，直接列出核心观点：\n" + text, userId);
     }
 
 

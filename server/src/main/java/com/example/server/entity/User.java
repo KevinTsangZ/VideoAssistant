@@ -1,6 +1,7 @@
 package com.example.server.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -23,6 +24,18 @@ public class User {
     private String role;
 
     private Integer freeUploadUsed;
+
+    private String aiBaseUrl;
+
+    private String aiApiKey;
+
+    private String aiModel;
+
+    @TableField(exist = false)
+    private Boolean hasAiApiKey;
+
+    @TableField(exist = false)
+    private String maskedAiApiKey;
 
     // 彻底删除了 createTime，防止 MyBatis 因为找不到配置而报错
     // 数据库会自动填入当前时间，放心
