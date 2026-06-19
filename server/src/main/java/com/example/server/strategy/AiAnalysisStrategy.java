@@ -17,4 +17,10 @@ public interface AiAnalysisStrategy {
      * @param videoPath 视频路径或URL
      */
     String generateSummary(String videoPath, Long userId);
+
+    /**
+     * 对已经识别出的文字进行智能总结
+     * @param text 视频语音识别文本
+     */
+    String generateSummaryFromText(String text, Long userId);
 }

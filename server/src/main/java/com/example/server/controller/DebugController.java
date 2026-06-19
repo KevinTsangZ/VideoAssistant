@@ -76,7 +76,7 @@ public class DebugController {
             //查库校验
             MediaFile file = mediaFileMapper.selectById(id);
             if (file == null) return "文件不存在";
-            if (file.getAiSummary() != null && file.getAiSummary().contains("正在")) {
+            if (isAnalysisRunning(file.getAiSummary())) {
                 return "任务已在后台运行，无需重复提交";
             }
 
@@ -100,6 +100,14 @@ public class DebugController {
                 lock.unlock();
             }
         }
+    }
+
+    private boolean isAnalysisRunning(String aiSummary) {
+        return aiSummary != null
+                && (aiSummary.contains("正在")
+                || aiSummary.contains("[MQ]")
+                || aiSummary.contains("等待调度")
+                || aiSummary.contains("消息队列"));
     }
 
     //纯文字提取接口

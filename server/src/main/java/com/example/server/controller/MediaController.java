@@ -2,6 +2,7 @@ package com.example.server.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.example.server.dto.AnalysisTaskMsg;
 import com.example.server.entity.MediaFile;
 import com.example.server.entity.User;
 import com.example.server.mapper.MediaFileMapper;
@@ -11,6 +12,7 @@ import com.example.server.utils.MinioUtils;
 import com.example.server.utils.YtDlpUtils; //确保导入这个
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.ResponseEntity;
@@ -50,6 +52,9 @@ public class MediaController {
     @Autowired
     private MediaService mediaService;
 
+    @Autowired
+    private RocketMQTemplate rocketMQTemplate;
+
     @PostMapping("/init-upload")
     public ResponseEntity<String> initUpload() {
         String uploadId = mediaService.initChunkedUpload();
@@ -79,6 +84,7 @@ public class MediaController {
             mediaFile.setFilename(file.getOriginalFilename());
             mediaFile.setFilePath(fileUrl);
             mediaFile.setStatus("COMPLETED");
+            mediaFile.setAiSummary("[MQ] 已进入消息队列，等待调度...");
             mediaFile.setUploadTime(LocalDateTime.now());
 
             if (userId != null) {
@@ -86,6 +92,7 @@ public class MediaController {
             }
 
             mediaFileMapper.insert(mediaFile);
+            enqueueAnalysisTask(mediaFile.getId());
 
             if (userId != null) {
                 if (quota.consumeFreeUpload()) {
@@ -129,6 +136,7 @@ public class MediaController {
             mediaFile.setFilename("WEB_" + tempFile.getName());
             mediaFile.setFilePath(fileUrl);
             mediaFile.setStatus("COMPLETED");
+            mediaFile.setAiSummary("[MQ] 已进入消息队列，等待调度...");
             mediaFile.setUploadTime(LocalDateTime.now());
 
             if (userId != null) {
@@ -136,6 +144,7 @@ public class MediaController {
             }
 
             mediaFileMapper.insert(mediaFile);
+            enqueueAnalysisTask(mediaFile.getId());
 
             if (userId != null) {
                 if (quota.consumeFreeUpload()) {
@@ -226,6 +235,15 @@ public class MediaController {
         update.eq("id", userId);
         update.setSql("free_upload_used = free_upload_used + 1");
         userMapper.update(null, update);
+    }
+
+    private void enqueueAnalysisTask(Long mediaId) {
+        if (mediaId == null) {
+            return;
+        }
+        AnalysisTaskMsg msg = new AnalysisTaskMsg(mediaId, "START_ANALYSIS");
+        rocketMQTemplate.convertAndSend("video-analysis-topic", msg);
+        System.out.println("Auto analysis task queued, mediaId: " + mediaId);
     }
 
     private UploadQuota checkUploadQuota(Long userId) {

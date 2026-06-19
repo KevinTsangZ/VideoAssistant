@@ -32,11 +32,14 @@ public class AiService {
 
         try {
             // 1. 语音转文字
-            String text = aiAnalysisStrategy.transcribe(mediaFile.getFilePath());
-            mediaFile.setTranscriptText(text);
+            String text = mediaFile.getTranscriptText();
+            if (!hasUsefulTranscript(text)) {
+                text = aiAnalysisStrategy.transcribe(mediaFile.getFilePath());
+                mediaFile.setTranscriptText(text);
+            }
 
             // 2. 智能总结
-            String summary = aiAnalysisStrategy.generateSummary(mediaFile.getFilePath(), mediaFile.getUserId());
+            String summary = aiAnalysisStrategy.generateSummaryFromText(text, mediaFile.getUserId());
             mediaFile.setAiSummary(summary);
 
             // 3. 保存数据库 (这一步你已经成功了)
@@ -99,5 +102,13 @@ public class AiService {
             e.printStackTrace();
             System.err.println(" [线程池] 提取失败: " + e.getMessage());
         }
+    }
+
+    private boolean hasUsefulTranscript(String text) {
+        return text != null
+                && text.trim().length() > 10
+                && !text.contains("失败")
+                && !text.contains("错误")
+                && !text.contains("Error");
     }
 }

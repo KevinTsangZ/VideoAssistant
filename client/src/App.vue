@@ -471,6 +471,7 @@ const uploadFile = async () => {
     showUploadModal.value = false
     await fetchUserQuota()
     await fetchList()
+    trackLatestAutoAnalysis()
   } catch (error) {
     console.error(error)
     showMsg('❌ 上传失败: ' + error.message, true)
@@ -517,6 +518,7 @@ const handleUrlUpload = async () => {
     videoUrl.value = ''
     await fetchUserQuota()
     await fetchList()
+    trackLatestAutoAnalysis()
   } catch (error) {
     console.error(error)
     // 提取后端传来的具体错误信息
@@ -550,6 +552,17 @@ const fetchList = async () => {
     }
   } catch (error) {
     console.error(error)
+  }
+}
+
+const trackLatestAutoAnalysis = () => {
+  const latest = list.value.reduce((current, item) => {
+    if (!current) return item
+    return Number(item.id) > Number(current.id) ? item : current
+  }, null)
+  if (latest && isAiPending(latest.aiSummary)) {
+    startPolling(latest.id, 'ai')
+    showMsg('✅ 上传完成，已自动开始生成视频笔记')
   }
 }
 
@@ -763,7 +776,7 @@ const aiAnalyze = async (id) => {
   const item = list.value.find(i => i.id === id)
 
   // 1. 如果已经有结果，直接显示
-  if (item && item.aiSummary && !item.aiSummary.includes("任务已") && !item.aiSummary.includes("正在")) {
+  if (item && isAiFinal(item.aiSummary)) {
     openSidebar('ai', 'AI 智能总结')
     sidebar.value.content = item.aiSummary
     sidebar.value.loading = false
@@ -771,7 +784,8 @@ const aiAnalyze = async (id) => {
   }
 
   // 2. 如果正在轮询，直接打开侧边栏
-  if (pollingTimers.value[id] && pollingTimers.value[id].type === 'ai') {
+  if ((pollingTimers.value[id] && pollingTimers.value[id].type === 'ai') || (item && isAiPending(item.aiSummary))) {
+    if (!pollingTimers.value[id]) startPolling(id, 'ai')
     openSidebar('ai', 'AI 智能总结')
     sidebar.value.loading = true
     sidebar.value.content = "🚀 系统正在后台拼命计算中...\n\n(任务正在进行，无需重复提交)"
@@ -808,6 +822,20 @@ const aiAnalyze = async (id) => {
     sidebar.value.content = "Error: " + e
     sidebar.value.loading = false
   }
+}
+
+const isAiPending = (text = '') => {
+  return text.includes('[MQ]')
+      || text.includes('消息队列')
+      || text.includes('等待调度')
+      || text.includes('正在')
+      || text.includes('任务已')
+}
+
+const isAiFinal = (text = '') => {
+  if (!text) return false
+  if (isAiPending(text)) return false
+  return text.includes('##') || text.includes('失败') || text.includes('Error') || text.includes('超时') || text.includes('500')
 }
 
 const startPolling = (id, type) => {
