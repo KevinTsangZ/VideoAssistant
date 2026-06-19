@@ -22,12 +22,17 @@ public class AliyunDeepSeekStrategy implements AiAnalysisStrategy {
 
     @Override
     public String transcribe(String videoPath) {
-        return processVideoToText(videoPath);
+        return processVideoToText(videoPath, null);
+    }
+
+    @Override
+    public String transcribe(String videoPath, Long userId) {
+        return processVideoToText(videoPath, userId);
     }
 
     @Override
     public String generateSummary(String videoPath, Long userId) {
-        String text = processVideoToText(videoPath);
+        String text = processVideoToText(videoPath, userId);
         if (text.startsWith("❌")) return text;
 
         return generateSummaryFromText(text, userId);
@@ -39,7 +44,7 @@ public class AliyunDeepSeekStrategy implements AiAnalysisStrategy {
     }
 
 
-    private String processVideoToText(String inputPath) {
+    private String processVideoToText(String inputPath, Long userId) {
         //简单检查
         if (inputPath == null || inputPath.isEmpty()) return "❌ 路径为空";
 
@@ -60,7 +65,7 @@ public class AliyunDeepSeekStrategy implements AiAnalysisStrategy {
             if (!success) return "FFmpeg 转换失败 (可能是网络超时或文件损坏)";
 
             // 4. 语音转文字
-            String text = aliyunAsrUtils.audioToText(outputMp3Path);
+            String text = aliyunAsrUtils.audioToText(outputMp3Path, userId);
             return text;
 
         } catch (Exception e) {

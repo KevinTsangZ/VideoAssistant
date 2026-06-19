@@ -12,6 +12,10 @@ public interface AiAnalysisStrategy {
      */
     String transcribe(String videoPath);
 
+    default String transcribe(String videoPath, Long userId) {
+        return transcribe(videoPath);
+    }
+
     /**
      * 对视频内容进行智能总结
      * @param videoPath 视频路径或URL

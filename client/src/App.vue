@@ -127,11 +127,25 @@
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>
                 </span>
                 <div class="label-group">
-                  <span class="item-label">AI 智能总结</span>
+                  <span class="item-label">AI总结</span>
                 </div>
                 <div class="shimmer"></div>
               </button>
             </div>
+
+            <button
+                class="rerun-btn"
+                :class="{ spinning: isRerunning(item.id) || isAiPending(item.aiSummary) }"
+                :disabled="item.status !== 'COMPLETED' || isRerunning(item.id) || isAiPending(item.aiSummary)"
+                @click.stop="rerunAnalysis(item)"
+                title="重新提取文字并AI总结"
+            >
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+                <polyline points="21 3 21 9 15 9"></polyline>
+              </svg>
+            </button>
           </div>
         </div>
       </section>
@@ -328,6 +342,7 @@ const authMessage = ref('')
 const authError = ref(false)
 const authForm = ref({ username: '', password: '', nickname: '' })
 const pollingTimers = ref({})
+const rerunningIds = ref({})
 const settingsSaving = ref(false)
 const settingsMessage = ref('')
 const settingsError = ref(false)
@@ -819,7 +834,7 @@ const aiAnalyze = async (id) => {
 
   // 1. 如果已经有结果，直接显示
   if (item && isAiFinal(item.aiSummary)) {
-    openSidebar('ai', 'AI 智能总结')
+    openSidebar('ai', 'AI总结')
     sidebar.value.content = item.aiSummary
     sidebar.value.loading = false
     return
@@ -828,14 +843,14 @@ const aiAnalyze = async (id) => {
   // 2. 如果正在轮询，直接打开侧边栏
   if ((pollingTimers.value[id] && pollingTimers.value[id].type === 'ai') || (item && isAiPending(item.aiSummary))) {
     if (!pollingTimers.value[id]) startPolling(id, 'ai')
-    openSidebar('ai', 'AI 智能总结')
+    openSidebar('ai', 'AI总结')
     sidebar.value.loading = true
     sidebar.value.content = "🚀 系统正在后台拼命计算中...\n\n(任务正在进行，无需重复提交)"
     return
   }
 
   // 3. 准备提交请求，打开侧边栏loading
-  openSidebar('ai', 'AI 智能总结')
+  openSidebar('ai', 'AI总结')
   sidebar.value.loading = true
   sidebar.value.content = "🚀 正在向分布式集群请求计算资源..."
 
@@ -863,6 +878,46 @@ const aiAnalyze = async (id) => {
   } catch (e) {
     sidebar.value.content = "Error: " + e
     sidebar.value.loading = false
+  }
+}
+
+const isRerunning = (id) => rerunningIds.value[id] === true
+
+const rerunAnalysis = async (item) => {
+  if (!item || item.status !== 'COMPLETED') return
+  if (isRerunning(item.id)) return
+  rerunningIds.value = { ...rerunningIds.value, [item.id]: true }
+  openSidebar('ai', 'AI总结')
+  sidebar.value.loading = true
+  sidebar.value.content = '正在重新提取文字并生成 AI总结...'
+  try {
+    const res = await fetch(`/api/debug/ai?id=${item.id}&force=true`)
+    const text = await res.text()
+    if (text.includes("⚠️") || text.includes("❌")) {
+      showMsg(text, true)
+      sidebar.value.loading = false
+      sidebar.value.content = text
+      return
+    }
+
+    const index = list.value.findIndex(i => i.id === item.id)
+    if (index >= 0) {
+      list.value[index] = {
+        ...list.value[index],
+        transcriptText: '',
+        aiSummary: '[MQ] 已进入消息队列，等待调度...'
+      }
+    }
+    startPolling(item.id, 'ai')
+    showMsg('✅ 已开始重新生成视频笔记')
+    sidebar.value.content = text + "\n\n⏳ 正在重新识别语音并生成 AI总结..."
+  } catch (error) {
+    console.error(error)
+    showMsg('❌ 重新分析请求失败', true)
+    sidebar.value.loading = false
+    sidebar.value.content = '重新分析请求失败: ' + error
+  } finally {
+    rerunningIds.value = { ...rerunningIds.value, [item.id]: false }
   }
 }
 
@@ -1283,7 +1338,7 @@ html, body, #app {
 .status-indicator.completed { color: #0f766e; border: 1px solid #99f6e4; background: #f0fdfa; }
 .status-indicator.processing { color: var(--accent-purple); border: 1px solid var(--accent-purple); animation: blink 1s infinite; }
 
-.action-dock { display: grid; grid-template-columns: 1fr 1fr 1.5fr; gap: 12px; padding: 12px; background: #f8fafc; }
+.action-dock { display: grid; grid-template-columns: 1fr 1fr 1.5fr; gap: 12px; padding: 12px 58px 12px 12px; background: #f8fafc; }
 .dock-item { position: relative; border: 1px solid var(--border-tech); background: var(--bg-card); border-radius: 8px; padding: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: all 0.3s; color: var(--text-sub); font-family: inherit; overflow: hidden; }
 .dock-item:hover:not(:disabled) { color: var(--accent-lime); border-color: var(--accent-lime); background: var(--bg-soft); }
 .dock-item:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -1292,6 +1347,27 @@ html, body, #app {
 .dock-item.ai-core .item-sub { font-size: 0.75rem; color: var(--accent-purple); opacity: 0.8; }
 .dock-item.ai-core:hover:not(:disabled) { border-color: var(--accent-purple); color: var(--text-inverse); background: var(--accent-purple); }
 .dock-item.ai-core:hover:not(:disabled) .item-sub { color: var(--text-inverse); }
+.rerun-btn {
+  position: absolute;
+  right: 12px;
+  bottom: 13px;
+  z-index: 4;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid #bfdbfe;
+  background: #ffffff;
+  color: var(--accent-lime);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 12px 28px -20px rgba(37, 99, 235, 0.65);
+  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+.rerun-btn:hover:not(:disabled) { background: var(--accent-lime); color: #ffffff; border-color: var(--accent-lime); transform: translateY(-1px); }
+.rerun-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+.rerun-btn.spinning svg { animation: spin 0.8s linear infinite; }
 
 /* Sidebar */
 .sidebar-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.22); backdrop-filter: blur(4px); z-index: 998; }

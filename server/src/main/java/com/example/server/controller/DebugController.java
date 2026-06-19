@@ -51,7 +51,8 @@ public class DebugController {
 
     //AI总结接口(分布式锁 + 限流 + MQ)
     @GetMapping("/ai")
-    public String aiAnalyze(@RequestParam Long id) {
+    public String aiAnalyze(@RequestParam Long id,
+                            @RequestParam(defaultValue = "false") boolean force) {
         //【Redisson 分布式锁】防瞬时并发连点
         String lockKey = "lock:analyze:" + id;
         org.redisson.api.RLock lock = redissonClient.getLock(lockKey);
@@ -81,6 +82,9 @@ public class DebugController {
             }
 
             //更新状态
+            if (force) {
+                file.setTranscriptText(null);
+            }
             file.setAiSummary("[MQ] 已进入消息队列，等待调度...");
             mediaFileMapper.updateById(file);
             String userIdKey = (file.getUserId() == null) ? "anon" : String.valueOf(file.getUserId());

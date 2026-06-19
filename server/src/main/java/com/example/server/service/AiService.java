@@ -34,7 +34,7 @@ public class AiService {
             // 1. 语音转文字
             String text = mediaFile.getTranscriptText();
             if (!hasUsefulTranscript(text)) {
-                text = aiAnalysisStrategy.transcribe(mediaFile.getFilePath());
+                text = aiAnalysisStrategy.transcribe(mediaFile.getFilePath(), mediaFile.getUserId());
                 mediaFile.setTranscriptText(text);
             }
 
@@ -85,7 +85,7 @@ public class AiService {
 
         try {
             //只做语音转文字
-            String text = aiAnalysisStrategy.transcribe(mediaFile.getFilePath());
+            String text = aiAnalysisStrategy.transcribe(mediaFile.getFilePath(), mediaFile.getUserId());
             mediaFile.setTranscriptText(text);
 
             //保存数据库
