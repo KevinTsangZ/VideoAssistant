@@ -1,7 +1,10 @@
 package com.example.server.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.example.server.entity.MediaFile;
+import com.example.server.entity.VideoAsset;
 import com.example.server.mapper.MediaFileMapper;
+import com.example.server.mapper.VideoAssetMapper;
 import com.example.server.strategy.AiAnalysisStrategy;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -9,99 +12,142 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class AiService {
 
     @Autowired
     private MediaFileMapper mediaFileMapper;
 
+    @Autowired(required = false)
+    private VideoAssetMapper videoAssetMapper;
+
     @Autowired
     @Qualifier("defaultAiStrategy")
     private AiAnalysisStrategy aiAnalysisStrategy;
 
-    // 【关键】必须注入 Redis 工具！
     @Autowired
     private StringRedisTemplate redisTemplate;
 
-
     public void asyncAnalyze(Long mediaId) {
-        System.out.println(" [线程池] 开始处理任务，ID: " + mediaId);
+        System.out.println("[AI] Start analysis, mediaId: " + mediaId);
 
         MediaFile mediaFile = mediaFileMapper.selectById(mediaId);
         if (mediaFile == null) return;
 
+        if (mediaFile.getAssetId() != null && videoAssetMapper != null) {
+            analyzeAsset(mediaFile);
+            return;
+        }
+
         try {
-            // 1. 语音转文字
             String text = mediaFile.getTranscriptText();
             if (!hasUsefulTranscript(text)) {
                 text = aiAnalysisStrategy.transcribe(mediaFile.getFilePath(), mediaFile.getUserId());
                 mediaFile.setTranscriptText(text);
             }
 
-            // 2. 智能总结
             String summary = aiAnalysisStrategy.generateSummaryFromText(text, mediaFile.getUserId());
             mediaFile.setAiSummary(summary);
-
-            // 3. 保存数据库 (这一步你已经成功了)
             mediaFileMapper.updateById(mediaFile);
+            clearUserCache(mediaFile.getUserId());
 
-
-            // 1. 拼装缓存 Key (必须和 MediaController 里的逻辑完全一致！)
-            // Controller 里是: "media:list:user:" + (userId == null ? "anon" : userId)
-            String userIdStr = (mediaFile.getUserId() == null) ? "anon" : String.valueOf(mediaFile.getUserId());
-            String cacheKey = "media:list:user:" + userIdStr;
-
-            // 2. 狠狠地删除
-            Boolean deleteResult = redisTemplate.delete(cacheKey);
-
-            // 3. 打印显眼日志 (请在黑窗口找这句话！！！)
-            if (Boolean.TRUE.equals(deleteResult)) {
-                System.out.println(" [线程池] 缓存清除成功！Key: " + cacheKey);
-            } else {
-                System.out.println("⚠️ [线程池] 缓存不存在或清除失败 (但这不影响新数据写入)，Key: " + cacheKey);
-            }
-
-            System.out.println("✅ [线程池] 任务全部完成，前端轮询将在下一次命中新数据。");
-
+            System.out.println("[AI] Analysis completed, mediaId: " + mediaId);
         } catch (Exception e) {
             e.printStackTrace();
-            System.err.println("❌ [线程池] 任务失败: " + e.getMessage());
-
-            // 失败也要删缓存，否则前端会一直转圈看不到“失败”两个字
-            String userIdStr = (mediaFile.getUserId() == null) ? "anon" : String.valueOf(mediaFile.getUserId());
-            redisTemplate.delete("media:list:user:" + userIdStr);
+            mediaFile.setAiSummary("分析失败: " + e.getMessage());
+            mediaFileMapper.updateById(mediaFile);
+            clearUserCache(mediaFile.getUserId());
         }
     }
 
-
-
-    //异步提取全文 (专门负责提取文字)
     @Async("aiTaskExecutor")
     public void asyncTranscribe(Long mediaId) {
-        System.out.println(" [线程池] 开始全文提取任务，ID: " + mediaId);
+        System.out.println("[AI] Start transcription, mediaId: " + mediaId);
 
         MediaFile mediaFile = mediaFileMapper.selectById(mediaId);
         if (mediaFile == null) return;
 
+        if (mediaFile.getAssetId() != null && videoAssetMapper != null) {
+            transcribeAsset(mediaFile);
+            return;
+        }
+
         try {
-            //只做语音转文字
             String text = aiAnalysisStrategy.transcribe(mediaFile.getFilePath(), mediaFile.getUserId());
             mediaFile.setTranscriptText(text);
-
-            //保存数据库
             mediaFileMapper.updateById(mediaFile);
-
-            //强制删除 Redis 缓存
-            String userIdStr = (mediaFile.getUserId() == null) ? "anon" : String.valueOf(mediaFile.getUserId());
-            String cacheKey = "media:list:user:" + userIdStr;
-            redisTemplate.delete(cacheKey);
-
-            System.out.println(" [线程池] 全文提取完成，缓存已清除！Key: " + cacheKey);
-
+            clearUserCache(mediaFile.getUserId());
         } catch (Exception e) {
             e.printStackTrace();
-            System.err.println(" [线程池] 提取失败: " + e.getMessage());
+            System.err.println("[AI] Transcription failed: " + e.getMessage());
         }
+    }
+
+    private void analyzeAsset(MediaFile mediaFile) {
+        VideoAsset asset = videoAssetMapper.selectById(mediaFile.getAssetId());
+        if (asset == null) return;
+
+        try {
+            asset.setStatus("PROCESSING");
+            videoAssetMapper.updateById(asset);
+
+            String text = asset.getTranscriptText();
+            if (!hasUsefulTranscript(text)) {
+                text = aiAnalysisStrategy.transcribe(asset.getFilePath(), mediaFile.getUserId());
+                asset.setTranscriptText(text);
+            }
+
+            String summary = aiAnalysisStrategy.generateSummaryFromText(text, mediaFile.getUserId());
+            asset.setAiSummary(summary);
+            asset.setStatus("COMPLETED");
+            videoAssetMapper.updateById(asset);
+
+            mediaFile.setTranscriptText(text);
+            mediaFile.setAiSummary(summary);
+            mediaFileMapper.updateById(mediaFile);
+            clearAssetUserCaches(asset.getId());
+        } catch (Exception e) {
+            e.printStackTrace();
+            asset.setStatus("FAILED");
+            asset.setAiSummary("分析失败: " + e.getMessage());
+            videoAssetMapper.updateById(asset);
+            clearAssetUserCaches(asset.getId());
+        }
+    }
+
+    private void transcribeAsset(MediaFile mediaFile) {
+        VideoAsset asset = videoAssetMapper.selectById(mediaFile.getAssetId());
+        if (asset == null) return;
+
+        try {
+            String text = aiAnalysisStrategy.transcribe(asset.getFilePath(), mediaFile.getUserId());
+            asset.setTranscriptText(text);
+            asset.setStatus("PROCESSING");
+            videoAssetMapper.updateById(asset);
+
+            mediaFile.setTranscriptText(text);
+            mediaFileMapper.updateById(mediaFile);
+            clearAssetUserCaches(asset.getId());
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.err.println("[AI] Asset transcription failed: " + e.getMessage());
+        }
+    }
+
+    private void clearAssetUserCaches(Long assetId) {
+        QueryWrapper<MediaFile> query = new QueryWrapper<>();
+        query.eq("asset_id", assetId);
+        List<MediaFile> mediaFiles = mediaFileMapper.selectList(query);
+        for (MediaFile media : mediaFiles) {
+            clearUserCache(media.getUserId());
+        }
+    }
+
+    private void clearUserCache(Long userId) {
+        String userIdStr = (userId == null) ? "anon" : String.valueOf(userId);
+        redisTemplate.delete("media:list:user:" + userIdStr);
     }
 
     private boolean hasUsefulTranscript(String text) {

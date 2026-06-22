@@ -2,7 +2,9 @@ package com.example.server.consumer;
 
 import com.example.server.dto.AnalysisTaskMsg;
 import com.example.server.entity.MediaFile;
+import com.example.server.entity.VideoAsset;
 import com.example.server.mapper.MediaFileMapper;
+import com.example.server.mapper.VideoAssetMapper;
 import com.example.server.service.AiService;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
@@ -22,6 +24,9 @@ public class VideoAnalysisConsumer implements RocketMQListener<AnalysisTaskMsg> 
 
     @Autowired
     private MediaFileMapper mediaFileMapper;
+
+    @Autowired(required = false)
+    private VideoAssetMapper videoAssetMapper;
 
     //注入之前配置好的 IO 密集型线程池
     @Autowired
@@ -50,6 +55,14 @@ public class VideoAnalysisConsumer implements RocketMQListener<AnalysisTaskMsg> 
     private void markAsFailed(Long id, String error) {
         MediaFile file = mediaFileMapper.selectById(id);
         if (file != null) {
+            if (file.getAssetId() != null && videoAssetMapper != null) {
+                VideoAsset asset = videoAssetMapper.selectById(file.getAssetId());
+                if (asset != null) {
+                    asset.setStatus("FAILED");
+                    asset.setAiSummary("分析失败: " + error);
+                    videoAssetMapper.updateById(asset);
+                }
+            }
             file.setAiSummary("❌ 分析失败: " + error);
             mediaFileMapper.updateById(file);
         }

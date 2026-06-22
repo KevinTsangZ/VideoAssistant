@@ -19,6 +19,7 @@ public class MediaFile {
     private String status;        //UPLOADED, COMPLETED
     private String filePath;
     private String fileMd5;
+    private Long assetId;
 
     //下面这几个是新加的
     private String aiSummary;

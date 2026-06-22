@@ -135,6 +135,20 @@
             </div>
 
             <button
+                class="rerun-btn independent-btn"
+                :class="{ spinning: isRerunning(item.id) || isAiPending(item.aiSummary) }"
+                :disabled="item.status !== 'COMPLETED' || isRerunning(item.id) || isAiPending(item.aiSummary)"
+                @click.stop="detachAndRerunAnalysis(item)"
+                title="独立重做，不影响其他用户复用的笔记"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <rect x="8" y="8" width="12" height="12" rx="2"></rect>
+                <path d="M4 16V6a2 2 0 0 1 2-2h10"></path>
+              </svg>
+            </button>
+
+            <button
                 class="rerun-btn"
                 :class="{ spinning: isRerunning(item.id) || isAiPending(item.aiSummary) }"
                 :disabled="item.status !== 'COMPLETED' || isRerunning(item.id) || isAiPending(item.aiSummary)"
@@ -310,6 +324,11 @@
 
               </div>
 
+              <label class="upload-reuse-option" v-if="!uploading && !uploadProgress.failed" @click.stop>
+                <input type="checkbox" v-model="forceNewUpload" />
+                <span>强制上传，不复用已有结果</span>
+              </label>
+
               <div class="magnet-content busy" v-else>
                 <div class="quantum-loader" v-if="!uploadProgress.failed"></div>
                 <span class="busy-text">{{ uploadProgress.stage || '正在建立通道并解析资源...' }}</span>
@@ -347,6 +366,7 @@ const uploading = ref(false)
 const uploadProgress = ref({ stage: '', percent: 0, uploadedChunks: 0, totalChunks: 0, failed: false })
 const list = ref([])
 const isDragOver = ref(false)
+const forceNewUpload = ref(false)
 const sidebar = ref({ visible: false, type: 'ai', title: '', content: '', loading: false })
 const currentUser = ref(null)
 const showUploadModal = ref(false)
@@ -420,6 +440,7 @@ const closeUploadModal = () => {
   if (uploading.value) return
   showUploadModal.value = false
   isDragOver.value = false
+  forceNewUpload.value = false
   resetUploadProgress()
 }
 
@@ -499,11 +520,25 @@ const uploadFile = async () => {
     uploadProgress.value.totalChunks = totalChunks
     const fileMd5 = await calculateFileMd5(currentFile)
     const initData = await initChunkUpload(currentFile, totalChunks, fileMd5)
+    if (initData.reused) {
+      uploadProgress.value.stage = '已复用已有视频笔记'
+      uploadProgress.value.percent = 100
+      uploadProgress.value.uploadedChunks = totalChunks
+      showMsg('✅ 已复用已有视频笔记')
+      showUploadModal.value = false
+      forceNewUpload.value = false
+      resetUploadProgress()
+      await fetchUserQuota()
+      await fetchList()
+      trackLatestAutoAnalysis()
+      return
+    }
     await uploadMissingChunks(currentFile, initData.uploadId, totalChunks, initData.uploadedChunks || [])
     await mergeChunkUpload(initData.uploadId)
 
     showMsg('✅ 本地上传完成')
     showUploadModal.value = false
+    forceNewUpload.value = false
     resetUploadProgress()
     await fetchUserQuota()
     await fetchList()
@@ -546,6 +581,7 @@ const initChunkUpload = async (targetFile, totalChunks, fileMd5) => {
   formData.append('chunkSize', CHUNK_SIZE)
   formData.append('totalChunks', totalChunks)
   formData.append('fileMd5', fileMd5)
+  formData.append('forceNew', forceNewUpload.value ? 'true' : 'false')
   const data = await postJson('/api/media/chunk/init', formData)
   uploadProgress.value.uploadedChunks = Array.isArray(data.uploadedChunks) ? data.uploadedChunks.length : 0
   uploadProgress.value.percent = Math.round((uploadProgress.value.uploadedChunks / totalChunks) * 100)
@@ -1004,20 +1040,22 @@ const isRerunning = (id) => rerunningIds.value[id] === true
 
 const rerunAnalysis = async (item) => {
   if (!item || item.status !== 'COMPLETED') return
+  if (!currentUser.value) {
+    showMsg('请先登录后再操作', true)
+    openAuthModal()
+    return
+  }
   if (isRerunning(item.id)) return
   rerunningIds.value = { ...rerunningIds.value, [item.id]: true }
   openSidebar('ai', 'AI总结')
   sidebar.value.loading = true
   sidebar.value.content = '正在重新提取文字并生成 AI总结...'
   try {
-    const res = await fetch(`/api/debug/ai?id=${item.id}&force=true`)
-    const text = await res.text()
-    if (text.includes("⚠️") || text.includes("❌")) {
-      showMsg(text, true)
-      sidebar.value.loading = false
-      sidebar.value.content = text
-      return
-    }
+    const formData = new FormData()
+    formData.append('mediaId', item.id)
+    formData.append('userId', currentUser.value.id)
+    const data = await postJson('/api/media/asset/detach-and-rerun', formData)
+    const text = data.msg || '已开始重新生成视频笔记'
 
     const index = list.value.findIndex(i => i.id === item.id)
     if (index >= 0) {
@@ -1038,6 +1076,10 @@ const rerunAnalysis = async (item) => {
   } finally {
     rerunningIds.value = { ...rerunningIds.value, [item.id]: false }
   }
+}
+
+const detachAndRerunAnalysis = async (item) => {
+  await rerunAnalysis(item)
 }
 
 const isAiPending = (text = '') => {
@@ -1320,6 +1362,30 @@ html, body, #app {
 /* 互斥变暗 */
 .split-container:has(.skew-pane:hover) .skew-pane:not(:hover) { opacity: 0.55; }
 
+.upload-reuse-option {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-tech);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-sub);
+  font-size: 0.82rem;
+  cursor: pointer;
+  box-shadow: 0 12px 28px -24px rgba(15, 23, 42, 0.45);
+}
+.upload-reuse-option input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-lime);
+}
+
 .magnet-icon { color: var(--accent-lime); margin-bottom: 1rem; }
 .magnet-title { font-size: 1.35rem; font-weight: 800; letter-spacing: 0; margin-bottom: 5px; }
 .magnet-desc { font-size: 0.9rem; color: var(--text-sub); }
@@ -1524,6 +1590,16 @@ html, body, #app {
 .rerun-btn:hover:not(:disabled) { background: var(--accent-lime); color: #ffffff; border-color: var(--accent-lime); transform: translateY(-1px); }
 .rerun-btn:disabled { cursor: not-allowed; opacity: 0.5; }
 .rerun-btn.spinning svg { animation: spin 0.8s linear infinite; }
+.rerun-btn.independent-btn {
+  bottom: 58px;
+  color: var(--accent-purple);
+  border-color: #ddd6fe;
+}
+.rerun-btn.independent-btn:hover:not(:disabled) {
+  background: var(--accent-purple);
+  border-color: var(--accent-purple);
+  color: #ffffff;
+}
 
 /* Sidebar */
 .sidebar-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.22); backdrop-filter: blur(4px); z-index: 998; }

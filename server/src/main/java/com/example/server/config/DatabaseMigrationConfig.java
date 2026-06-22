@@ -17,6 +17,7 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         ensureFreeUploadUsedColumn();
+        ensureVideoAssetTables();
     }
 
     private void ensureFreeUploadUsedColumn() {
@@ -47,8 +48,43 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 jdbcTemplate.execute("ALTER TABLE media_files ADD COLUMN file_md5 VARCHAR(64) NULL");
                 System.out.println("Database migrated: media_files.file_md5 added");
             }
+            if (!columnExists("media_files", "asset_id")) {
+                jdbcTemplate.execute("ALTER TABLE media_files ADD COLUMN asset_id BIGINT NULL");
+                System.out.println("Database migrated: media_files.asset_id added");
+            }
         } catch (Exception e) {
             System.err.println("Database migration skipped: " + e.getMessage());
+        }
+    }
+
+    private void ensureVideoAssetTables() {
+        try {
+            if (!tableExists("video_assets")) {
+                jdbcTemplate.execute(
+                        "CREATE TABLE video_assets (" +
+                                "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, " +
+                                "file_md5 VARCHAR(64) NULL, " +
+                                "filename VARCHAR(255) NULL, " +
+                                "file_path VARCHAR(1024) NULL, " +
+                                "status VARCHAR(32) NOT NULL DEFAULT 'COMPLETED', " +
+                                "transcript_text LONGTEXT NULL, " +
+                                "ai_summary LONGTEXT NULL, " +
+                                "cover_url VARCHAR(1024) NULL, " +
+                                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
+                                "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, " +
+                                "ref_count INT NOT NULL DEFAULT 0, " +
+                                "INDEX idx_video_assets_file_md5 (file_md5), " +
+                                "INDEX idx_video_assets_file_path (file_path(255))" +
+                                ")"
+                );
+                System.out.println("Database migrated: video_assets created");
+            }
+            if (!indexExists("media_files", "idx_media_files_asset_id")) {
+                jdbcTemplate.execute("CREATE INDEX idx_media_files_asset_id ON media_files(asset_id)");
+                System.out.println("Database migrated: media_files.asset_id indexed");
+            }
+        } catch (Exception e) {
+            System.err.println("Video asset migration skipped: " + e.getMessage());
         }
     }
 
@@ -59,6 +95,27 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 Integer.class,
                 tableName,
                 columnName
+        );
+        return exists != null && exists > 0;
+    }
+
+    private boolean tableExists(String tableName) {
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES " +
+                        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+                Integer.class,
+                tableName
+        );
+        return exists != null && exists > 0;
+    }
+
+    private boolean indexExists(String tableName, String indexName) {
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS " +
+                        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
+                Integer.class,
+                tableName,
+                indexName
         );
         return exists != null && exists > 0;
     }
