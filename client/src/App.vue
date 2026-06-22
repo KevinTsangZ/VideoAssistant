@@ -140,7 +140,7 @@
                 :disabled="item.status !== 'COMPLETED' || isRerunning(item.id) || isAiPending(item.aiSummary)"
                 @click.stop="detachAndRerunAnalysis(item)"
                 aria-label="独立重做"
-                title="生成一份独立笔记并重新分析"
+                data-tooltip="生成独立笔记并重新分析"
             >
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                    stroke-linecap="round" stroke-linejoin="round">
@@ -157,7 +157,8 @@
                 :class="{ spinning: isRerunning(item.id) || isAiPending(item.aiSummary) }"
                 :disabled="item.status !== 'COMPLETED' || isRerunning(item.id) || isAiPending(item.aiSummary)"
                 @click.stop="rerunAnalysis(item)"
-                title="重新提取文字并AI总结"
+                aria-label="重新提取文字并AI总结"
+                data-tooltip="重新提取文字并AI总结"
             >
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                    stroke-linecap="round" stroke-linejoin="round">
@@ -1594,6 +1595,61 @@ html, body, #app {
 .rerun-btn:hover:not(:disabled) { background: var(--accent-lime); color: #ffffff; border-color: var(--accent-lime); transform: translateY(-1px); }
 .rerun-btn:disabled { cursor: not-allowed; opacity: 0.5; }
 .rerun-btn.spinning svg { animation: spin 0.8s linear infinite; }
+.rerun-btn[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 10px);
+  z-index: 20;
+  transform: translate(4px, -50%);
+  width: max-content;
+  max-width: 190px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 600;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 14px 30px -18px rgba(15, 23, 42, 0.72);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.12s ease 0.05s, transform 0.12s ease 0.05s, visibility 0s linear 0.17s;
+}
+.rerun-btn[data-tooltip]::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 4px);
+  z-index: 21;
+  width: 8px;
+  height: 8px;
+  background: #0f172a;
+  transform: translate(4px, -50%) rotate(45deg);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.12s ease 0.05s, transform 0.12s ease 0.05s, visibility 0s linear 0.17s;
+}
+.rerun-btn[data-tooltip]:hover::after,
+.rerun-btn[data-tooltip]:focus-visible::after,
+.rerun-btn[data-tooltip]:hover::before,
+.rerun-btn[data-tooltip]:focus-visible::before {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0.05s, 0.05s, 0s;
+}
+.rerun-btn[data-tooltip]:hover::after,
+.rerun-btn[data-tooltip]:focus-visible::after {
+  transform: translate(0, -50%);
+}
+.rerun-btn[data-tooltip]:hover::before,
+.rerun-btn[data-tooltip]:focus-visible::before {
+  transform: translate(0, -50%) rotate(45deg);
+}
 .rerun-btn.independent-btn {
   bottom: 58px;
   color: #0284c7;
