@@ -139,12 +139,16 @@
                 :class="{ spinning: isRerunning(item.id) || isAiPending(item.aiSummary) }"
                 :disabled="item.status !== 'COMPLETED' || isRerunning(item.id) || isAiPending(item.aiSummary)"
                 @click.stop="detachAndRerunAnalysis(item)"
-                title="独立重做，不影响其他用户复用的笔记"
+                aria-label="独立重做"
+                title="生成一份独立笔记并重新分析"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                    stroke-linecap="round" stroke-linejoin="round">
-                <rect x="8" y="8" width="12" height="12" rx="2"></rect>
-                <path d="M4 16V6a2 2 0 0 1 2-2h10"></path>
+                <circle cx="6" cy="6" r="2.5"></circle>
+                <circle cx="18" cy="6" r="2.5"></circle>
+                <circle cx="18" cy="18" r="2.5"></circle>
+                <path d="M8.5 6h7"></path>
+                <path d="M8 7.7c4.5 2.2 7.2 5 8.6 8"></path>
               </svg>
             </button>
 
@@ -524,7 +528,7 @@ const uploadFile = async () => {
       uploadProgress.value.stage = '已复用已有视频笔记'
       uploadProgress.value.percent = 100
       uploadProgress.value.uploadedChunks = totalChunks
-      showMsg('✅ 已复用已有视频笔记')
+      showMsg('✅ 该视频已经被有缘人上传过啦，可以直接复用视频笔记')
       showUploadModal.value = false
       forceNewUpload.value = false
       resetUploadProgress()
@@ -1592,12 +1596,14 @@ html, body, #app {
 .rerun-btn.spinning svg { animation: spin 0.8s linear infinite; }
 .rerun-btn.independent-btn {
   bottom: 58px;
-  color: var(--accent-purple);
-  border-color: #ddd6fe;
+  color: #0284c7;
+  border-color: #bae6fd;
+  background: #f0f9ff;
+  box-shadow: 0 12px 28px -22px rgba(2, 132, 199, 0.65);
 }
 .rerun-btn.independent-btn:hover:not(:disabled) {
-  background: var(--accent-purple);
-  border-color: var(--accent-purple);
+  background: #0284c7;
+  border-color: #0284c7;
   color: #ffffff;
 }
 
