@@ -272,7 +272,7 @@
                 @dragleave.prevent="isDragOver = false"
                 @drop.prevent="handleDrop"
             >
-              <div class="split-container" v-if="!uploading">
+              <div class="split-container" v-if="!uploading && !uploadProgress.failed">
 
                 <label for="file-input" class="skew-pane pane-local">
                   <div class="pane-content unskew">
@@ -311,8 +311,18 @@
               </div>
 
               <div class="magnet-content busy" v-else>
-                <div class="quantum-loader"></div>
-                <span class="busy-text">正在建立通道并解析资源...</span>
+                <div class="quantum-loader" v-if="!uploadProgress.failed"></div>
+                <span class="busy-text">{{ uploadProgress.stage || '正在建立通道并解析资源...' }}</span>
+                <div class="chunk-progress" v-if="uploadProgress.totalChunks > 0">
+                  <div class="chunk-progress-bar">
+                    <span :style="{ width: uploadProgress.percent + '%' }"></span>
+                  </div>
+                  <div class="chunk-progress-meta">
+                    <span>{{ uploadProgress.percent }}%</span>
+                    <span>{{ uploadProgress.uploadedChunks }} / {{ uploadProgress.totalChunks }} 分片</span>
+                  </div>
+                </div>
+                <button v-if="uploadProgress.failed" class="retry-upload-btn" @click="retryChunkUpload">重试上传</button>
               </div>
 
               <div class="border-glow"></div>
@@ -327,12 +337,14 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { marked } from 'marked'
+import SparkMD5 from 'spark-md5'
 
 // --- 变量定义 ---
 const file = ref(null)
 const videoUrl = ref('')
 const message = ref('')
 const uploading = ref(false)
+const uploadProgress = ref({ stage: '', percent: 0, uploadedChunks: 0, totalChunks: 0, failed: false })
 const list = ref([])
 const isDragOver = ref(false)
 const sidebar = ref({ visible: false, type: 'ai', title: '', content: '', loading: false })
@@ -357,6 +369,8 @@ const settingsForm = ref({
   maskedAiApiKey: ''
 })
 const FREE_UPLOAD_LIMIT = 5
+const CHUNK_SIZE = 5 * 1024 * 1024
+const CHUNK_CONCURRENCY = 3
 
 const freeUploadUsed = computed(() => {
   const used = Number(currentUser.value?.freeUploadUsed ?? 0)
@@ -406,6 +420,7 @@ const closeUploadModal = () => {
   if (uploading.value) return
   showUploadModal.value = false
   isDragOver.value = false
+  resetUploadProgress()
 }
 
 const openSettingsModal = async () => {
@@ -470,34 +485,132 @@ const handleDrop = async (e) => {
   await uploadFile()
 }
 
-// 【普通文件上传】
+// 【本地文件分片上传】
 const uploadFile = async () => {
   if (!file.value) return
   uploading.value = true
-  message.value = '正在建立加密通道并上传数据...'
-  const formData = new FormData()
-  formData.append('file', file.value)
-  if (currentUser.value) formData.append('userId', currentUser.value.id)
+  resetUploadProgress()
+  uploadProgress.value.stage = '正在计算文件指纹...'
+  message.value = '正在计算文件指纹...'
 
   try {
-    const res = await fetch('/api/media/upload', {
-      method: 'POST',
-      body: formData
-    })
-    const text = await res.text()
-    if (!res.ok) throw new Error(text || 'Upload failed')
+    const currentFile = file.value
+    const totalChunks = Math.ceil(currentFile.size / CHUNK_SIZE)
+    uploadProgress.value.totalChunks = totalChunks
+    const fileMd5 = await calculateFileMd5(currentFile)
+    const initData = await initChunkUpload(currentFile, totalChunks, fileMd5)
+    await uploadMissingChunks(currentFile, initData.uploadId, totalChunks, initData.uploadedChunks || [])
+    await mergeChunkUpload(initData.uploadId)
 
     showMsg('✅ 本地上传完成')
     showUploadModal.value = false
+    resetUploadProgress()
     await fetchUserQuota()
     await fetchList()
     trackLatestAutoAnalysis()
   } catch (error) {
     console.error(error)
+    uploadProgress.value.failed = true
+    uploadProgress.value.stage = '上传中断，可点击重试继续补传'
     showMsg('❌ 上传失败: ' + error.message, true)
   } finally {
     uploading.value = false
   }
+}
+
+const retryChunkUpload = async () => {
+  if (!file.value || uploading.value) return
+  await uploadFile()
+}
+
+const calculateFileMd5 = async (targetFile) => {
+  const spark = new SparkMD5.ArrayBuffer()
+  const totalChunks = Math.ceil(targetFile.size / CHUNK_SIZE)
+  for (let index = 0; index < totalChunks; index++) {
+    const start = index * CHUNK_SIZE
+    const end = Math.min(start + CHUNK_SIZE, targetFile.size)
+    const buffer = await readBlobAsArrayBuffer(targetFile.slice(start, end))
+    spark.append(buffer)
+    uploadProgress.value.stage = `正在计算文件指纹 ${index + 1}/${totalChunks}`
+    uploadProgress.value.percent = Math.min(8, Math.round(((index + 1) / totalChunks) * 8))
+  }
+  return spark.end()
+}
+
+const initChunkUpload = async (targetFile, totalChunks, fileMd5) => {
+  uploadProgress.value.stage = '正在初始化断点续传会话...'
+  const formData = new FormData()
+  formData.append('userId', currentUser.value.id)
+  formData.append('filename', targetFile.name)
+  formData.append('fileSize', targetFile.size)
+  formData.append('chunkSize', CHUNK_SIZE)
+  formData.append('totalChunks', totalChunks)
+  formData.append('fileMd5', fileMd5)
+  const data = await postJson('/api/media/chunk/init', formData)
+  uploadProgress.value.uploadedChunks = Array.isArray(data.uploadedChunks) ? data.uploadedChunks.length : 0
+  uploadProgress.value.percent = Math.round((uploadProgress.value.uploadedChunks / totalChunks) * 100)
+  return data
+}
+
+const uploadMissingChunks = async (targetFile, uploadId, totalChunks, uploadedChunks) => {
+  const uploadedSet = new Set((uploadedChunks || []).map(Number))
+  const missingChunks = []
+  for (let index = 0; index < totalChunks; index++) {
+    if (!uploadedSet.has(index)) missingChunks.push(index)
+  }
+  let cursor = 0
+  let completed = uploadedSet.size
+  uploadProgress.value.stage = missingChunks.length > 0 ? '正在上传视频分片...' : '分片已全部上传，准备合并...'
+  uploadProgress.value.uploadedChunks = completed
+  uploadProgress.value.percent = Math.round((completed / totalChunks) * 100)
+
+  const worker = async () => {
+    while (cursor < missingChunks.length) {
+      const chunkIndex = missingChunks[cursor++]
+      const start = chunkIndex * CHUNK_SIZE
+      const end = Math.min(start + CHUNK_SIZE, targetFile.size)
+      const formData = new FormData()
+      formData.append('uploadId', uploadId)
+      formData.append('chunkIndex', chunkIndex)
+      formData.append('file', targetFile.slice(start, end), `${targetFile.name}.part-${chunkIndex}`)
+      await postJson('/api/media/chunk/part', formData)
+      completed += 1
+      uploadProgress.value.uploadedChunks = completed
+      uploadProgress.value.percent = Math.round((completed / totalChunks) * 100)
+      uploadProgress.value.stage = `正在上传视频分片 ${completed}/${totalChunks}`
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(CHUNK_CONCURRENCY, missingChunks.length) }, () => worker())
+  await Promise.all(workers)
+}
+
+const mergeChunkUpload = async (uploadId) => {
+  uploadProgress.value.stage = '分片上传完成，正在合并视频...'
+  uploadProgress.value.percent = 100
+  const formData = new FormData()
+  formData.append('uploadId', uploadId)
+  return postJson('/api/media/chunk/merge', formData)
+}
+
+const postJson = async (url, formData) => {
+  const res = await fetch(url, { method: 'POST', body: formData })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || (data.code && data.code !== 200)) {
+    throw new Error(data.msg || '请求失败')
+  }
+  return data
+}
+
+const readBlobAsArrayBuffer = (blob) => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(reader.result)
+  reader.onerror = () => reject(reader.error || new Error('文件读取失败'))
+  reader.readAsArrayBuffer(blob)
+})
+
+const resetUploadProgress = () => {
+  uploadProgress.value = { stage: '', percent: 0, uploadedChunks: 0, totalChunks: 0, failed: false }
 }
 
 // 【链接上传 - 修复版】
@@ -518,6 +631,8 @@ const handleUrlUpload = async () => {
   }
 
   uploading.value = true
+  resetUploadProgress()
+  uploadProgress.value.stage = '正在解析链接并极速下载...'
   message.value = '正在解析链接并极速下载 (低码率模式)...'
 
   const formData = new FormData()
@@ -1231,6 +1346,42 @@ html, body, #app {
   background: var(--bg-card); position: relative; z-index: 50;
 }
 .busy-text { margin-top: 15px; color: var(--accent-lime); animation: pulse-lime 2s infinite; }
+.chunk-progress {
+  width: min(360px, 78%);
+  margin-top: 18px;
+}
+.chunk-progress-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbe7f5;
+}
+.chunk-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-lime), var(--accent-purple));
+  transition: width 0.2s ease;
+}
+.chunk-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  color: var(--text-sub);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.retry-upload-btn {
+  margin-top: 18px;
+  border: 1px solid var(--accent-lime);
+  background: var(--accent-lime);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-weight: 800;
+}
+.retry-upload-btn:hover { background: #1d4ed8; border-color: #1d4ed8; }
 /* === [END] 重构结束 === */
 
 .notification-bar { margin-top: 2rem; display: inline-block; background: var(--accent-lime); color: var(--text-inverse); padding: 10px 24px; font-weight: 700; border-radius: 8px; box-shadow: var(--shadow-glow-lime); }

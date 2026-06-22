@@ -43,6 +43,10 @@ public class DatabaseMigrationConfig implements ApplicationRunner {
                 jdbcTemplate.execute("ALTER TABLE users ADD COLUMN ai_model VARCHAR(128) NULL");
                 System.out.println("Database migrated: users.ai_model added");
             }
+            if (!columnExists("media_files", "file_md5")) {
+                jdbcTemplate.execute("ALTER TABLE media_files ADD COLUMN file_md5 VARCHAR(64) NULL");
+                System.out.println("Database migrated: media_files.file_md5 added");
+            }
         } catch (Exception e) {
             System.err.println("Database migration skipped: " + e.getMessage());
         }

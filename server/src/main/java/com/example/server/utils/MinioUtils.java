@@ -1,5 +1,7 @@
 package com.example.server.utils;
 
+import io.minio.ComposeObjectArgs;
+import io.minio.ComposeSource;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
@@ -9,6 +11,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Component
@@ -90,5 +94,67 @@ public class MinioUtils {
         }
 
         return endpoint + "/" + bucketName + "/" + file.getName();
+    }
+
+    public void uploadChunk(String uploadId, int chunkIndex, MultipartFile chunk) throws Exception {
+        try (InputStream inputStream = chunk.getInputStream()) {
+            minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(chunkObjectName(uploadId, chunkIndex))
+                            .stream(inputStream, chunk.getSize(), -1)
+                            .contentType("application/octet-stream")
+                            .build()
+            );
+        }
+    }
+
+    public String composeChunks(String uploadId, int totalChunks, String finalObjectName) throws Exception {
+        List<ComposeSource> sources = new ArrayList<>();
+        for (int i = 0; i < totalChunks; i++) {
+            sources.add(
+                    ComposeSource.builder()
+                            .bucket(bucketName)
+                            .object(chunkObjectName(uploadId, i))
+                            .build()
+            );
+        }
+
+        minioClient.composeObject(
+                ComposeObjectArgs.builder()
+                        .bucket(bucketName)
+                        .object(finalObjectName)
+                        .sources(sources)
+                        .build()
+        );
+
+        return endpoint + "/" + bucketName + "/" + finalObjectName;
+    }
+
+    public void removeChunkObjects(String uploadId, int totalChunks) {
+        for (int i = 0; i < totalChunks; i++) {
+            try {
+                minioClient.removeObject(
+                        RemoveObjectArgs.builder()
+                                .bucket(bucketName)
+                                .object(chunkObjectName(uploadId, i))
+                                .build()
+                );
+            } catch (Exception e) {
+                System.err.println("MinIO 分片删除失败: " + chunkObjectName(uploadId, i) + ", " + e.getMessage());
+            }
+        }
+    }
+
+    public String generateObjectName(String originalFilename) {
+        String suffix = "";
+        if (originalFilename != null && originalFilename.contains(".")) {
+            suffix = originalFilename.substring(originalFilename.lastIndexOf("."));
+        }
+        return UUID.randomUUID() + suffix;
+    }
+
+    private String chunkObjectName(String uploadId, int chunkIndex) {
+        return "chunks/" + uploadId + "/" + chunkIndex + ".part";
     }
 }
