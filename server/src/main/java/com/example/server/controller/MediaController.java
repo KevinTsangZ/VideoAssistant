@@ -106,9 +106,6 @@ public class MediaController {
                 redisTemplate.opsForValue().set(indexKey, uploadId, CHUNK_SESSION_TTL_HOURS, TimeUnit.HOURS);
             }
 
-            redisTemplate.expire(chunkMetaKey(uploadId), CHUNK_SESSION_TTL_HOURS, TimeUnit.HOURS);
-            redisTemplate.expire(chunkPartsKey(uploadId), CHUNK_SESSION_TTL_HOURS, TimeUnit.HOURS);
-
             Map<String, Object> body = response(200, "分片上传初始化成功");
             body.put("uploadId", uploadId);
             body.put("uploadedChunks", uploadedChunkIndexes(uploadId));
@@ -141,9 +138,6 @@ public class MediaController {
                 minioUtils.uploadChunk(uploadId, chunkIndex, file);
                 redisTemplate.opsForSet().add(chunkPartsKey(uploadId), part);
             }
-
-            redisTemplate.expire(chunkMetaKey(uploadId), CHUNK_SESSION_TTL_HOURS, TimeUnit.HOURS);
-            redisTemplate.expire(chunkPartsKey(uploadId), CHUNK_SESSION_TTL_HOURS, TimeUnit.HOURS);
 
             Map<String, Object> body = response(200, "分片上传成功");
             body.put("uploadedChunks", uploadedChunkIndexes(uploadId));
